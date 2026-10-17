@@ -1,0 +1,4 @@
+aiogram==3.13.1
+python-dotenv==1.0.1
+duckduckgo-search==6.1.5
+rapidfuzz==3.9.0
