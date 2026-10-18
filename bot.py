@@ -3,6 +3,7 @@ import asyncio
 import logging
 import random
 import re
+import httpx
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -329,7 +330,8 @@ async def handle_search(message: types.Message):
 
     try:
         loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(None, perform_search, search_query)
+        # Передаем is_article в функцию поиска
+        results = await loop.run_in_executor(None, perform_search, search_query, is_article)
 
         if not results:
             await status_msg.edit_text(
@@ -416,9 +418,40 @@ async def handle_search(message: types.Message):
             "Но не беда! Мы поправим очки и попробуем снова. Подожди чуток и переверни страницу еще раз. 🌟"
         )
 
-def perform_search(search_query):
-    with DDGS() as ddgs:
-        return list(ddgs.text(search_query, max_results=5))
+def perform_search(search_query, is_article=False):
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(search_query, max_results=5))
+            if results:
+                return results
+    except Exception as e:
+        logging.warning(f"DuckDuckGo не сработал: {e}. Пробуем запасной вариант.")
+    
+    if is_article:
+        try:
+            clean_query = search_query.replace("научная статья PDF", "").strip()
+            url = "https://api.openalex.org/works"
+            params = {
+                "search": clean_query,
+                "per_page": 5,
+                "sort": "relevance_score:desc"
+            }
+            
+            response = httpx.get(url, params=params, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                results = []
+                for item in data.get("results", []):
+                    results.append({
+                        "title": item.get("title", "Без названия"),
+                        "href": item.get("doi") or item.get("id", ""),
+                        "body": "Научная статья. Откройте ссылку для подробностей."
+                    })
+                return results
+        except Exception as e:
+            logging.error(f"OpenAlex тоже не сработал: {e}")
+    
+    return []
 
 async def main():
     print("🦉🐻 Сова и Медведь раскрыли Книгу Царства...")
