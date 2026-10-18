@@ -4,16 +4,12 @@ import logging
 import random
 import re
 import httpx
-from urllib.parse import urlparse
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from ddgs import DDGS
 from rapidfuzz import process, fuzz
-
-from config import (SAFE_DOMAINS, ART_COMPANIONS, AUTHORS_AND_TITLES, HARD_FORBIDDEN, ADULT_MARKERS, SAFE_CHILDREN_WORDS, LITERARY_CONTEXT, FIRST_WELCOMES, RETURNING_WELCOMES)
-from ai_brain import smart_search
 
 logging.basicConfig(level=logging.INFO)
 load_dotenv()
@@ -24,25 +20,29 @@ if not TOKEN: raise ValueError("Токен не найден!")
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# Хранилища
 user_history, user_settings, user_age_group, user_language, user_search_type = {}, {}, {}, {}, {}
 
-def is_safe_domain(url: str) -> bool:
-    try:
-        domain = urlparse(url).netloc.lower()
-        return any(safe in domain for safe in SAFE_DOMAINS) or "google" in domain or "yandex" in domain
-    except: return False
+# --- БАЗА ЗНАНИЙ ---
+ART_COMPANIONS = {
+    "гарри поттер": {
+        "painting_name": "Замок на скале", "painting_author": "Каспар Давид Фридрих", "painting_year": "1822", "painting_file": "castle.jpg",
+        "music": "«Сюита №3» Иоганна Себастьяна Баха (1720-е)",
+        "fun_fact": "🖼️ Совиная тайна:\n\nВ кабинете Дамблдора висят портреты реальных людей! В фильме они стилизованы под Хогвартс.\n\nНажми кнопку ниже, чтобы увидеть коллаж!",
+        "secret_paintings": [{"file": "grozny.jpg", "name": "Портрет Ивана Грозного", "author": "Виктор Васнецов", "year": "1897"}],
+        "bear_advice": "🐻 «Эту книгу хорошо читать под шум дождя и треск дров в печи.»"
+    },
+    "мастер и маргарита": {
+        "painting_name": "Демон сидящий", "painting_author": "Михаил Врубель", "painting_year": "1890", "painting_file": "demon.jpg",
+        "music": "«Лунная соната» Людвига ван Бетховена (1801)",
+        "fun_fact": "🖼️ Совиная тайна:\n\nБулгаков писал роман в тяжелые годы. Сцена с балом навеяна его размышлениями о Москве.",
+        "secret_paintings": [{"file": "demon_sitting.jpg", "name": "Демон сидящий", "author": "Михаил Врубель", "year": "1890"}],
+        "bear_advice": "🐻 «А эту историю лучше читать при свечах.»"
+    }
+}
 
-BAD_WORDS_REGEX = re.compile(r'\b(хуй|хуя|хуе|пизд|бляд|ебан|ебал|ебл|заеб|мраз|гандон|долбо)[а-я]*\b', re.IGNORECASE)
-def has_hard_forbidden(text: str) -> bool: return any(word in text.lower() for word in HARD_FORBIDDEN)
-def has_bad_language(text: str) -> bool: return bool(BAD_WORDS_REGEX.search(text))
-def is_adult_query(query: str) -> bool:
-    text_lower = query.lower()
-    if any(safe_word in text_lower for safe_word in SAFE_CHILDREN_WORDS): return False
-    if not any(marker in text_lower for marker in ADULT_MARKERS): return False
-    if any(ctx in text_lower for ctx in LITERARY_CONTEXT): return False
-    return True
-def has_emoji_or_stickers(message: types.Message) -> bool:
-    return bool(message.sticker or message.animation or (message.text and re.search(r'[\U00010000-\U0010ffff]', message.text)))
+AUTHORS_AND_TITLES = ["пушкин", "гарри поттер", "толстой", "достоевский", "шестерка воронов", "эрагон", "хроники нарнии", "перси джексон", "властелин колец", "мастер и маргарита"]
+
 def correct_typos(text: str) -> str:
     words = text.split()
     corrected_words = []
@@ -53,6 +53,24 @@ def correct_typos(text: str) -> str:
         corrected_words.append(word.replace(clean_word, match) if score > 80 else word)
     return " ".join(corrected_words)
 
+HARD_FORBIDDEN = ["терроризм", "экстремизм", "наркотики", "оружие", "взрывчатка", "суицид", "убийство", "нацизм", "фашизм", "педофилия"]
+ADULT_MARKERS = ["18+", "эротика", "эротический", "хоррор", "ужасы", "взрослый", "секс", "порно", "порнография", "интим", "для взрослых", "хентай"]
+BAD_WORDS_REGEX = re.compile(r'\b(хуй|хуя|хуе|пизд|бляд|ебан|ебал|ебл|заеб|мраз|гандон|долбо)[а-я]*\b', re.IGNORECASE)
+SAFE_CHILDREN_WORDS = ["детск", "сказк", "для детей", "малыш", "дошкольн", "гарри поттер", "хроники нарнии", "перси джексон"]
+LITERARY_CONTEXT = ["литература", "история", "психология", "роман", "исследование", "анализ", "книга", "учебник", "статья", "наука", "культура", "искусство"]
+
+def has_hard_forbidden(text: str) -> bool: return any(word in text.lower() for word in HARD_FORBIDDEN)
+def has_bad_language(text: str) -> bool: return bool(BAD_WORDS_REGEX.search(text))
+def is_adult_query(query: str) -> bool:
+    text_lower = query.lower()
+    if any(safe_word in text_lower for safe_word in SAFE_CHILDREN_WORDS): return False
+    if not any(marker in text_lower for marker in ADULT_MARKERS): return False
+    if any(ctx in text_lower for ctx in LITERARY_CONTEXT): return False
+    return True
+def has_emoji_or_stickers(message: types.Message) -> bool:
+    return bool(message.sticker or message.animation or (message.text and re.search(r'[\U00010000-\U0010ffff]', message.text)))
+
+# --- КЛАВИАТУРЫ ---
 def get_main_keyboard(): return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="✍️ Автор"), KeyboardButton(text="📖 Книга")], [KeyboardButton(text="🎭 Жанр"), KeyboardButton(text="🔬 Наука")], [KeyboardButton(text="🌐 Язык поиска")]], resize_keyboard=True)
 def get_language_keyboard(): return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🇷🇺 Русский"), KeyboardButton(text="🇬🇧 English")], [KeyboardButton(text="🇪🇸 Español"), KeyboardButton(text="⬅️ Назад в меню")]], resize_keyboard=True)
 def get_age_keyboard(): return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Да, мне есть 18", callback_data="age_yes")], [InlineKeyboardButton(text="❌ Нет, я младше", callback_data="age_no")]])
@@ -65,6 +83,25 @@ def get_art_keyboard(book_key):
 def get_format_keyboard(query): return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📥 Скачать EPUB", callback_data=f"fmt_epub_{query}")], [InlineKeyboardButton(text="📥 Скачать PDF", callback_data=f"fmt_pdf_{query}")], [InlineKeyboardButton(text="📖 Читать онлайн", callback_data=f"fmt_online_{query}")]])
 def get_fun_fact_keyboard(): return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 Посмотреть коллаж (PeopleTalk)", url="https://peopletalk.ru/article/iskusstvo-v-garri-pottere-7-realnyh-kartin-kotorye-ty-tochno-ne-zamechal-na-stenah-hogvartsa/")]])
 
+# --- ПРИВЕТСТВИЯ ---
+FIRST_WELCOMES = ["Здравствуй, добрый странник! 🦉🐻\n\nЯ — Сова, хранительница Книги. Скажи, какую дорогу выберем сегодня?", "Приветствую у костра, странник! 🔥🦉\n\nКаждая книга — это вселенная. Какую звезду зажжем сегодня?"]
+RETURNING_WELCOMES = ["С возвращением, Странник! 🌌🦉\n\nМожет, отыщем историю о далеких мирах?", "Звезды шепнули мне, что ты вернулся... ✨🐻\n\nС чего начнем?", "С возвращением! 🌊🦉\n\nПоищем историю о морских глубинах?"]
+
+# --- УМНЫЙ ПОИСК (GROQ) ---
+async def smart_search(query: str, search_type: str) -> str:
+    GROQ_KEY = os.getenv("GROQ_API_KEY")
+    if not GROQ_KEY: return query
+    model = "llama-3.3-70b-versatile"
+    system_prompt = "Ты — библиотекарь. Переформулируй запрос для поиска книг (добавь 'книга скачать EPUB PDF') или статей (добавь 'научная статья PDF'). Отвечай ТОЛЬКО запросом."
+    if search_type == "article": system_prompt = "Ты — научный ассистент. Переформулируй запрос для поиска научных статей. Отвечай только запросом."
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"}, json={"model": model, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Запрос: {query}"}], "max_tokens": 50, "temperature": 0.1}, timeout=15.0)
+            if response.status_code == 200: return response.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e: logging.error(f"Ошибка Groq: {e}")
+    return query
+
+# --- ОБРАБОТЧИКИ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
@@ -161,6 +198,7 @@ async def process_format_choice(callback: types.CallbackQuery):
     await execute_search(callback.message, new_query, callback.from_user.id, "format")
     await callback.answer()
 
+# --- ПОИСК (БЕЗ БЕЛОГО СПИСКА) ---
 async def execute_search(message: types.Message, query: str, user_id: int, search_type: str):
     lang = user_language.get(user_id, "🇷🇺 Русский"); lang_suffix = " english" if lang == "🇬🇧 English" else " español" if lang == "🇪🇸 Español" else ""
     status_msg = await message.answer(f"📖 Шелестят страницы...\n\n🦉 Сова ищет «{query}»...")
@@ -175,7 +213,8 @@ async def execute_search(message: types.Message, query: str, user_id: int, searc
         unique_titles, unique_results = set(), []
         for res in results:
             title, url, snippet = res.get("title", "Без названия"), res.get("href", ""), res.get("body", "Нет описания.")
-            if not is_safe_domain(url) or has_bad_language(title + snippet) or has_hard_forbidden(title + snippet): continue
+            # Убрали проверку is_safe_domain! Теперь бот не боится ссылок.
+            if has_bad_language(title + snippet) or has_hard_forbidden(title + snippet): continue
             if title[:30].lower() in unique_titles: continue
             unique_titles.add(title[:30].lower()); unique_results.append((title, url, snippet[:150] + "..."))
         if not unique_results: await message.answer("🦉🐻 Все ссылки ведут на небезопасные площадки. Попробуем иначе?"); return
