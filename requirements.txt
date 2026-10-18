@@ -1,5 +1,5 @@
-aiogram==3.13.1
-python-dotenv==1.0.1
-duckduckgo-search==6.3.5
-rapidfuzz==3.9.0
-httpx
+aiogram>=3.31.0
+python-dotenv>=1.2.4
+ddgs>=9.16.0
+rapidfuzz>=3.14.6
+httpx>=0.28.1
