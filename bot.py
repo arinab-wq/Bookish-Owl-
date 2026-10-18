@@ -198,7 +198,7 @@ async def process_format_choice(callback: types.CallbackQuery):
     await execute_search(callback.message, new_query, callback.from_user.id, "format")
     await callback.answer()
 
-# --- ПОИСК (БЕЗ БЕЛОГО СПИСКА) ---
+# --- ПОИСК ---
 async def execute_search(message: types.Message, query: str, user_id: int, search_type: str):
     lang = user_language.get(user_id, "🇷🇺 Русский"); lang_suffix = " english" if lang == "🇬🇧 English" else " español" if lang == "🇪🇸 Español" else ""
     status_msg = await message.answer(f"📖 Шелестят страницы...\n\n🦉 Сова ищет «{query}»...")
@@ -208,24 +208,38 @@ async def execute_search(message: types.Message, query: str, user_id: int, searc
 
     try:
         results = await asyncio.get_event_loop().run_in_executor(None, perform_search, query, search_type, lang_suffix)
-        if not results: await status_msg.edit_text("🦉🐻 Ничего не нашлось. Попробуй иначе!"); return
-        await status_msg.delete(); await message.answer("✨ Страницы зашелестели:")
+        if not results: 
+            await status_msg.edit_text("🦉🐻 Ничего не нашлось. Попробуй иначе!"); 
+            return
+            
+        await status_msg.delete(); 
+        await message.answer("✨ Страницы зашелестели:")
+        
         unique_titles, unique_results = set(), []
         for res in results:
             title, url, snippet = res.get("title", "Без названия"), res.get("href", ""), res.get("body", "Нет описания.")
-            # Убрали проверку is_safe_domain! Теперь бот не боится ссылок.
             if has_bad_language(title + snippet) or has_hard_forbidden(title + snippet): continue
             if title[:30].lower() in unique_titles: continue
             unique_titles.add(title[:30].lower()); unique_results.append((title, url, snippet[:150] + "..."))
-        if not unique_results: await message.answer("🦉🐻 Все ссылки ведут на небезопасные площадки. Попробуем иначе?"); return
+            
+        if not unique_results: 
+            await message.answer("🦉🐻 Все ссылки ведут на небезопасные площадки. Попробуем иначе?"); 
+            return
+            
         for title, url, snippet in unique_results:
             await message.answer(f"📜 {title}\n\n{snippet}", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔗 Открыть", url=url)]]), disable_web_page_preview=True)
-        if search_type in ["book", "format"] and query not in AUTHORS_AND_TITLES:
+        
+        # --- КНОПКИ ФОРМАТА ПОЯВЛЯЮТСЯ ВСЕГДА, ЕСЛИ ЭТО ПОИСК КНИГИ ---
+        if search_type in ["book", "format", "author"]:
             await message.answer("🦉🐻 «В каком формате читать?»", reply_markup=get_format_keyboard(query))
+            
         for key, arts in ART_COMPANIONS.items():
             if key in query and (user_settings.get(user_id, {}).get('paintings') or user_settings.get(user_id, {}).get('music')):
-                await message.answer("🦉🐻 «У нас есть кое-что интересное!»", reply_markup=get_art_keyboard(key)); break
-    except Exception as e: logging.error(f"Ошибка: {e}"); await status_msg.edit_text("⚠️ Ветер сорвал страницы. Попробуй снова.")
+                await message.answer("🦉🐻 «У нас есть кое-что интересное!»", reply_markup=get_art_keyboard(key)); 
+                break
+    except Exception as e: 
+        logging.error(f"Ошибка: {e}"); 
+        await status_msg.edit_text("⚠️ Ветер сорвал страницы. Попробуй снова.")
 
 @dp.message()
 async def handle_search(message: types.Message):
